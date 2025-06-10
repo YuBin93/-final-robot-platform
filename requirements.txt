@@ -1,8 +1,8 @@
 streamlit
 pandas
-requests
-pyarrow
+supabase-client
+psycopg2-binary
 folium
+streamlit-folium
 altair
 jieba
-streamlit-folium
