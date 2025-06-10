@@ -1,8 +1,11 @@
-streamlit
-pandas
-supabase-client
-psycopg2-binary
-folium
-streamlit-folium
-altair
-jieba
+# 经过版本锁定的、保证稳定的依赖列表
+streamlit==1.33.0
+pandas==2.2.1
+requests==2.31.0
+pyarrow==15.0.0
+folium==0.16.0
+streamlit-folium==0.19.0
+altair==5.2.0
+jieba==0.42.1
+supabase==2.0.4
+psycopg2-binary==2.9.9
