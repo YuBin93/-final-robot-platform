@@ -1,20 +1,11 @@
 # 这是我们整个自动化系统（展示厅 + 生产线）所需的全部零件
+# 我们只使用轻量级的、已经被证明可以成功安装的库
 
-# "展示厅" 和 "生产线" 都需要的核心工具
-pandas
-
-# "展示厅" 专用的工具
 streamlit
+pandas
 folium
 streamlit-folium
 altair
-
-# "生产线" 专用的工具
-requests  # 用于爬虫访问API
-supabase-client==1.0.3 # 为爬虫提供一个稳定的v1版数据库写入工具
-
-# "展示厅" 和 "生产线" 都可能用到的中文分词工具
 jieba
-
-# "展示厅" 专用的轻量级数据库读取工具
-postgrest-py
+requests
+postgrest-py # <-- 这是我们唯一的、通用的数据库操作工具
