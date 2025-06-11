@@ -33,7 +33,9 @@ def load_data():
     try:
         response = client.from_("companies").select("*").execute()
         # --- 关键修复：从响应中提取数据的正确方式 ---
-        df = pd.DataFrame(response.data)
+        # 我们将响应视为一个字典，并安全地获取 'data' 键对应的值
+        data_list = response.data
+        df = pd.DataFrame(data_list)
     except Exception as e:
         st.error(f"从数据库读取数据时发生错误。")
         st.exception(e)
