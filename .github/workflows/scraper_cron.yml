@@ -1,0 +1,41 @@
+# 这是自动化任务的“工作手册”
+name: Scheduled Data Scraping
+
+on:
+  # 这个设置允许我们手动点击“Run”按钮来触发任务，方便测试
+  workflow_dispatch:
+
+  # 这个设置是我们的“定时闹钟”
+  schedule:
+    # 每天在 UTC 时间凌晨2点运行 (大约是北京时间上午10点)
+    # 注意下面这行代码的正确缩进，它比 schedule 多两个空格
+    - cron: '0 2 * * *'
+
+jobs:
+  scrape:
+    # 使用最新版的 ubuntu 服务器来执行我们的任务
+    runs-on: ubuntu-latest
+
+    steps:
+      # 第一步：把我们的所有代码文件（包括爬虫）下载到这台临时服务器上
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 第二步：在这台服务器上安装 Python 环境
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      # 第三步：安装所有我们需要的 Python 库
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      # 第四步：运行我们的爬虫脚本，并使用我们之前在 GitHub Secrets 中配置好的密钥
+      - name: Run scraper to fetch data from API
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python scraper.py
