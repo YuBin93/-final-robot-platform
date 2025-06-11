@@ -1,10 +1,9 @@
-# app.py (最终修复版 - 强制使用正确的 /rest/v1 路径)
+# app.py (最终方案 - 内置手动更新功能)
 
 import streamlit as st
 import pandas as pd
-from postgrest import PostgrestClient
+from supabase import create_client, Client
 import os
-import asyncio
 from collections import Counter
 import folium
 from folium.plugins import HeatMap
@@ -15,41 +14,54 @@ import jieba
 # --- 常量和配置 ---
 st.set_page_config(layout="wide")
 STOP_WORDS = {"公司", "有限", "责任", "技术", "科技", "发展", "的", "和", "等", "与", "及"}
+# 您可以自己设定一个更复杂的密码
+ADMIN_PASSWORD = "password123" 
 
 # --- 数据库连接 ---
 try:
     url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_KEY"]
-
-    # --- 关键修复：智能地构建正确的 API base_url ---
-    # 1. 移除末尾可能存在的斜杠，确保URL纯净
-    cleaned_url = url.rstrip('/')
-    # 2. 确保它以 /rest/v1 结尾
-    if not cleaned_url.endswith('/rest/v1'):
-        base_url_for_client = cleaned_url + '/rest/v1'
-    else:
-        base_url_for_client = cleaned_url
-    
-    client = PostgrestClient(base_url=base_url_for_client, headers={"apikey": key, "Authorization": f"Bearer {key}"})
-
+    supabase: Client = create_client(url, key)
 except Exception as e:
-    st.error("无法初始化数据库连接，请检查 Streamlit Cloud 的 Secrets 配置。")
+    st.error("无法初始化数据库连接，请检查 Streamlit Cloud 的 Secrets 配置是否正确。")
     st.exception(e)
     st.stop()
+
+# --- 数据抓取与更新逻辑 ---
+def run_scraper():
+    """这是一个完整的爬虫和数据库更新函数"""
+    try:
+        with st.spinner("正在从数据源抓取最新数据..."):
+            data_url = "https://gist.githubusercontent.com/ai-side-projects/74884107a729e240c4974751ed23811e/raw/companies_data.csv"
+            df = pd.read_csv(data_url)
+        
+        with st.spinner(f"抓取到 {len(df)} 条数据。正在写入数据库..."):
+            df_to_insert = df.rename(columns={
+                '公司名称': 'company_name', '省份': 'province', '城市': 'city',
+                '主营产品': 'main_product', '联系电话': 'phone', '联系邮箱': 'email',
+                '官网': 'website', '纬度': 'latitude', '经度': 'longitude'
+            })
+            records = df_to_insert.to_dict(orient="records")
+            
+            # 先清空旧数据
+            supabase.table("companies").delete().gt("id", 0).execute()
+            # 插入新数据
+            supabase.table("companies").insert(records).execute()
+        
+        st.success(f"数据更新成功！共写入 {len(records)} 条新记录。请刷新页面查看最新数据。")
+        # 清理缓存，确保下次刷新能看到新数据
+        st.cache_data.clear()
+        
+    except Exception as e:
+        st.error("数据更新过程中发生错误。")
+        st.exception(e)
 
 # --- 核心数据加载逻辑 ---
 @st.cache_data(ttl=600)
 def load_data():
-    """从 Supabase 数据库加载数据 (正确处理异步)"""
-    try:
-        query_promise = client.from_("companies").select("*").execute()
-        response = asyncio.run(query_promise)
-        df = pd.DataFrame(response.data)
-    except Exception as e:
-        st.error(f"从数据库读取数据时发生错误。")
-        st.exception(e)
-        return pd.DataFrame()
-    
+    """从 Supabase 数据库加载数据"""
+    response = supabase.table("companies").select("*").execute()
+    df = pd.DataFrame(response.data)
     df.rename(columns={
         'company_name': '公司名称', 'province': '省份', 'city': '城市',
         'main_product': '主营产品', 'phone': '联系电话', 'email': '联系邮箱',
@@ -57,40 +69,36 @@ def load_data():
     }, inplace=True, errors='ignore')
     return df
 
-# --- 可视化和主界面函数 (保持不变) ---
+# --- 可视化和主界面函数 ---
 def draw_heatmap(df):
-    st.subheader("🗺 企业地理分布热力图")
-    df_geo = df.dropna(subset=["纬度", "经度"])
-    if df_geo.empty: st.warning("没有可供显示的地理数据。"); return
-    map_center = [df_geo["纬度"].mean(), df_geo["经度"].mean()]
-    m = folium.Map(location=map_center, zoom_start=5)
-    HeatMap(data=df_geo[["纬度", "经度"]].values, radius=12).add_to(m)
-    st_folium(m, width=700, height=500)
+    st.subheader("🗺 企业地理分布热力图") # ... (此处省略与之前相同的代码)
+    df_geo = df.dropna(subset=["纬度", "经度"]); map_center = [df_geo["纬度"].mean(), df_geo["经度"].mean()]; m = folium.Map(location=map_center, zoom_start=5); HeatMap(data=df_geo[["纬度", "经度"]].values, radius=12).add_to(m); st_folium(m, width=700, height=500)
 
 def product_bar_chart(df):
-    st.subheader("📊 主营产品关键词频次图")
-    if df.empty or "主营产品" not in df.columns: st.warning("没有可供分析的产品数据。"); return
-    texts = " ".join(df["主营产品"].astype(str).tolist())
-    words = jieba.lcut(texts)
-    words = [w for w in words if len(w) > 1 and w not in STOP_WORDS]
-    if not words: st.info("未提取到有效的关键词。"); return
-    top_words = Counter(words).most_common(15)
-    bar_df = pd.DataFrame(top_words, columns=["关键词", "频次"])
-    chart = alt.Chart(bar_df).mark_bar().encode(x=alt.X("频次:Q"), y=alt.Y("关键词:N", sort="-x"), tooltip=["关键词", "频次"]).properties(title="主营产品高频词 Top 15")
-    st.altair_chart(chart, use_container_width=True)
+    st.subheader("📊 主营产品关键词频次图") # ... (此处省略与之前相同的代码)
+    texts = " ".join(df["主营产品"].astype(str).tolist()); words = jieba.lcut(texts); words = [w for w in words if len(w) > 1 and w not in STOP_WORDS]; top_words = Counter(words).most_common(15); bar_df = pd.DataFrame(top_words, columns=["关键词", "频次"]); chart = alt.Chart(bar_df).mark_bar().encode(x=alt.X("频次:Q"), y=alt.Y("关键词:N", sort="-x"), tooltip=["关键词", "频次"]).properties(title="主营产品高频词 Top 15"); st.altair_chart(chart, use_container_width=True)
 
 def main():
     st.title("🤖 动态中国机器人制造业客户情报平台")
-    st.caption("数据源：Supabase 实时云数据库 (最终修复版)")
+    st.caption("数据源：Supabase 实时云数据库 (手动更新版)")
+    
+    # --- 管理员更新模块 ---
+    st.sidebar.subheader("⚙️ 管理员操作")
+    password = st.sidebar.text_input("请输入管理员密码", type="password")
+    if password == ADMIN_PASSWORD:
+        if st.sidebar.button("立即更新数据"):
+            run_scraper()
+    elif password:
+        st.sidebar.error("密码错误")
+
+    # --- 主应用界面 ---
     df = load_data()
-    if df is None:
-        st.error("数据加载返回了意外的 None 值。")
-        st.stop()
+    
     if df.empty:
-        st.success("🎉 第二阶段成功！应用已能完美连接到数据库。")
-        st.info("数据库当前为空，请期待第三阶段的自动化爬虫为其填充数据！")
-        st.balloons()
+        st.warning("ℹ️ 数据库当前为空。请在左侧管理员操作区输入密码，并点击“立即更新数据”来填充初始数据。")
         st.stop()
+        
+    st.sidebar.divider()
     st.sidebar.header("筛选条件")
     provinces = ["全部"] + sorted(df["省份"].unique().tolist())
     province = st.sidebar.selectbox("选择省份", options=provinces)
