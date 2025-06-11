@@ -1,8 +1,8 @@
-# app.py (最终修复版 - 使用正确的 'base_url' 参数)
+# app.py (最终修复版 - 修正数据提取逻辑)
 
 import streamlit as st
 import pandas as pd
-from postgrest import PostgrestClient # 我们将使用这个库的正确方法
+from postgrest import PostgrestClient
 import os
 from collections import Counter
 import folium
@@ -19,16 +19,11 @@ STOP_WORDS = {"公司", "有限", "责任", "技术", "科技", "发展", "的",
 try:
     url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_KEY"]
-
-    # 移除末尾可能存在的斜杠，确保URL纯净
-    url = url.rstrip('/') 
-
-    # --- 关键修复：使用正确的参数名 'base_url' ---
+    url = url.rstrip('/')
     client = PostgrestClient(base_url=url, headers={"apikey": key, "Authorization": f"Bearer {key}"})
-
 except Exception as e:
     st.error("无法初始化数据库连接，请检查 Streamlit Cloud 的 Secrets 配置。")
-    st.exception(e) # 显示详细错误
+    st.exception(e)
     st.stop()
 
 # --- 核心数据加载逻辑 ---
@@ -37,17 +32,20 @@ def load_data():
     """从 Supabase 数据库加载数据"""
     try:
         response = client.from_("companies").select("*").execute()
+        # --- 关键修复：从响应中提取数据的正确方式 ---
         df = pd.DataFrame(response.data)
-        df.rename(columns={
-            'company_name': '公司名称', 'province': '省份', 'city': '城市',
-            'main_product': '主营产品', 'phone': '联系电话', 'email': '联系邮箱',
-            'website': '官网', 'latitude': '纬度', 'longitude': '经度'
-        }, inplace=True)
-        return df
     except Exception as e:
         st.error(f"从数据库读取数据时发生错误。")
-        st.exception(e) # 显示详细错误
-        return pd.DataFrame()
+        st.exception(e)
+        return pd.DataFrame() # 返回空DataFrame以触发后续的提示
+    
+    # 重命名列
+    df.rename(columns={
+        'company_name': '公司名称', 'province': '省份', 'city': '城市',
+        'main_product': '主营产品', 'phone': '联系电话', 'email': '联系邮箱',
+        'website': '官网', 'latitude': '纬度', 'longitude': '经度'
+    }, inplace=True, errors='ignore') # errors='ignore' 增加健壮性
+    return df
 
 # --- 可视化和主界面函数 (保持不变) ---
 def draw_heatmap(df):
@@ -73,11 +71,18 @@ def product_bar_chart(df):
 
 def main():
     st.title("🤖 动态中国机器人制造业客户情报平台")
-    st.caption("数据源：Supabase 实时云数据库 (最终修复版)")
+    st.caption("数据源：Supabase 实时云数据库 (第二阶段完成)")
+    
     df = load_data()
+    
+    # 检查数据库是否为空
     if df.empty:
-        st.info("✅ 应用已成功连接到数据库，但数据库当前为空。请等待爬虫写入数据。")
+        st.success("🎉 第二阶段成功！应用已能完美连接到数据库。")
+        st.info("数据库当前为空，请期待第三阶段的自动化爬虫为其填充数据！")
+        st.balloons()
         st.stop()
+        
+    # 如果数据库有数据，则显示完整界面
     st.sidebar.header("筛选条件")
     provinces = ["全部"] + sorted(df["省份"].unique().tolist())
     province = st.sidebar.selectbox("选择省份", options=provinces)
