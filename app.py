@@ -1,8 +1,8 @@
-# app.py (最终修复版 - 强制修正URL)
+# app.py (最终修复版 - 使用正确的 'base_url' 参数)
 
 import streamlit as st
 import pandas as pd
-from postgrest import PostgrestClient
+from postgrest import PostgrestClient # 我们将使用这个库的正确方法
 import os
 from collections import Counter
 import folium
@@ -20,10 +20,12 @@ try:
     url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_KEY"]
 
-    # --- 关键修复：强制移除URL末尾可能存在的斜杠 ---
+    # 移除末尾可能存在的斜杠，确保URL纯净
     url = url.rstrip('/') 
 
-    client = PostgrestClient(rest_url=url, headers={"apikey": key})
+    # --- 关键修复：使用正确的参数名 'base_url' ---
+    client = PostgrestClient(base_url=url, headers={"apikey": key, "Authorization": f"Bearer {key}"})
+
 except Exception as e:
     st.error("无法初始化数据库连接，请检查 Streamlit Cloud 的 Secrets 配置。")
     st.exception(e) # 显示详细错误
@@ -32,7 +34,7 @@ except Exception as e:
 # --- 核心数据加载逻辑 ---
 @st.cache_data(ttl=600)
 def load_data():
-    """从 Supabase 数据库加载数据 (使用 postgrest-py)"""
+    """从 Supabase 数据库加载数据"""
     try:
         response = client.from_("companies").select("*").execute()
         df = pd.DataFrame(response.data)
@@ -71,7 +73,7 @@ def product_bar_chart(df):
 
 def main():
     st.title("🤖 动态中国机器人制造业客户情报平台")
-    st.caption("数据源：Supabase 实时云数据库 (轻量连接版)")
+    st.caption("数据源：Supabase 实时云数据库 (最终修复版)")
     df = load_data()
     if df.empty:
         st.info("✅ 应用已成功连接到数据库，但数据库当前为空。请等待爬虫写入数据。")
