@@ -1,7 +1,7 @@
 streamlit
 pandas
-supabase-client==1.0.3  # 我们将统一使用这个库
 folium
 streamlit-folium
 altair
 jieba
+postgrest-py
