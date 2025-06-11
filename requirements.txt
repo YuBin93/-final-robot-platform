@@ -1,7 +1,14 @@
+# Streamlit 应用及其可视化依赖
 streamlit
 pandas
 folium
 streamlit-folium
 altair
 jieba
+
+# Streamlit 应用连接数据库所需的轻量级库
 postgrest-py
+
+# 自动化爬虫连接数据库所需的库
+supabase-client==1.0.3
+requests
