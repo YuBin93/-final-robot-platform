@@ -1,10 +1,10 @@
-# app.py (最终修复版 - 正确处理异步逻辑)
+# app.py (最终修复版 - 强制使用正确的 /rest/v1 路径)
 
 import streamlit as st
 import pandas as pd
 from postgrest import PostgrestClient
 import os
-import asyncio # <-- 关键修复1：导入异步处理库
+import asyncio
 from collections import Counter
 import folium
 from folium.plugins import HeatMap
@@ -20,8 +20,18 @@ STOP_WORDS = {"公司", "有限", "责任", "技术", "科技", "发展", "的",
 try:
     url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_KEY"]
-    url = url.rstrip('/')
-    client = PostgrestClient(base_url=url, headers={"apikey": key, "Authorization": f"Bearer {key}"})
+
+    # --- 关键修复：智能地构建正确的 API base_url ---
+    # 1. 移除末尾可能存在的斜杠，确保URL纯净
+    cleaned_url = url.rstrip('/')
+    # 2. 确保它以 /rest/v1 结尾
+    if not cleaned_url.endswith('/rest/v1'):
+        base_url_for_client = cleaned_url + '/rest/v1'
+    else:
+        base_url_for_client = cleaned_url
+    
+    client = PostgrestClient(base_url=base_url_for_client, headers={"apikey": key, "Authorization": f"Bearer {key}"})
+
 except Exception as e:
     st.error("无法初始化数据库连接，请检查 Streamlit Cloud 的 Secrets 配置。")
     st.exception(e)
@@ -32,20 +42,14 @@ except Exception as e:
 def load_data():
     """从 Supabase 数据库加载数据 (正确处理异步)"""
     try:
-        # --- 关键修复2：正确地“兑现”异步请求 ---
-        # 1. 创建一个查询的“承诺” (coroutine)
         query_promise = client.from_("companies").select("*").execute()
-        # 2. 使用 asyncio.run() 来运行这个承诺，并等待真正的响应结果
         response = asyncio.run(query_promise)
-        # 3. 从真正的响应结果中提取数据
         df = pd.DataFrame(response.data)
-        
     except Exception as e:
         st.error(f"从数据库读取数据时发生错误。")
         st.exception(e)
         return pd.DataFrame()
     
-    # 重命名列
     df.rename(columns={
         'company_name': '公司名称', 'province': '省份', 'city': '城市',
         'main_product': '主营产品', 'phone': '联系电话', 'email': '联系邮箱',
@@ -78,19 +82,15 @@ def product_bar_chart(df):
 def main():
     st.title("🤖 动态中国机器人制造业客户情报平台")
     st.caption("数据源：Supabase 实时云数据库 (最终修复版)")
-    
     df = load_data()
-    
-    if df is None: # 添加一个额外的安全检查
+    if df is None:
         st.error("数据加载返回了意外的 None 值。")
         st.stop()
-        
     if df.empty:
         st.success("🎉 第二阶段成功！应用已能完美连接到数据库。")
         st.info("数据库当前为空，请期待第三阶段的自动化爬虫为其填充数据！")
         st.balloons()
         st.stop()
-        
     st.sidebar.header("筛选条件")
     provinces = ["全部"] + sorted(df["省份"].unique().tolist())
     province = st.sidebar.selectbox("选择省份", options=provinces)
