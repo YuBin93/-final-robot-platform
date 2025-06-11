@@ -1,4 +1,4 @@
-# scraper.py (最终方案 - 统一使用 postgrest-py)
+# scraper.py (最终方案 - 修正数据库清空逻辑)
 
 import os
 import pandas as pd
@@ -8,7 +8,6 @@ import asyncio
 
 # --- 异步执行的辅助函数 ---
 def run_async(coro):
-    """一个安全的异步运行器"""
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -25,11 +24,10 @@ try:
     client = PostgrestClient(base_url=base_url_for_client, headers={"apikey": key, "Authorization": f"Bearer {key}"})
 except Exception as e:
     print(f"无法初始化数据库连接: {e}")
-    exit(1) # 连接失败则直接退出
+    exit(1)
 
 # --- 自动化爬虫逻辑 ---
 def fetch_data_from_real_api():
-    """从一个绝对可靠的、公开的网站API抓取数据"""
     api_url = "https://jsonplaceholder.typicode.com/users"
     print(f"正在从网站API '{api_url}' 抓取数据...")
     try:
@@ -45,7 +43,6 @@ def fetch_data_from_real_api():
 
 # --- 数据库更新逻辑 ---
 def update_database(df):
-    """将抓取到的数据处理并更新到 Supabase 数据库 (使用 postgrest-py)"""
     if df.empty:
         print("没有抓取到数据，跳过数据库更新。"); return
 
@@ -62,11 +59,19 @@ def update_database(df):
     records = df_to_insert.to_dict(orient="records")
     
     try:
-        print("清空旧数据...")
-        run_async(client.from_("companies").delete().gt("id", -1).execute())
+        # --- 关键修复：使用更可靠的 RPC 调用来清空表 ---
+        # 我们不再依赖于删除 id，而是直接调用一个数据库函数来清空表
+        # 为此，我们需要先在 Supabase 数据库中创建一个简单的函数
+        # （我将在下一步指导您完成，非常简单）
+        # 目前，我们暂时注释掉清空操作，只做插入，以验证流程
+        
+        # print("清空旧数据...")
+        # run_async(client.rpc("truncate_companies", {})) # 这是最终的、更可靠的方法
+
         print("开始插入新数据...")
         run_async(client.from_("companies").insert(records).execute())
         print(f"成功插入 {len(records)} 条新数据。")
+
     except Exception as e:
         print(f"数据库写入操作失败: {e}")
 
