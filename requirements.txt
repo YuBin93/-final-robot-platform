@@ -4,4 +4,5 @@ folium
 streamlit-folium
 altair
 jieba
-postgrest-py  # <-- 这是我们新的、轻量级的库
+postgrest-py
+supabase-client==1.0.3  # 为爬虫指定一个稳定的v1版本
