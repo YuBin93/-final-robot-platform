@@ -1,47 +1,96 @@
-# app.py (最终诊断版 - Secrets 检测工具)
+# app.py (最终修复版 - 强制修正URL)
 
 import streamlit as st
+import pandas as pd
+from postgrest import PostgrestClient
+import os
+from collections import Counter
+import folium
+from folium.plugins import HeatMap
+from streamlit_folium import st_folium
+import altair as alt
+import jieba
 
+# --- 常量和配置 ---
 st.set_page_config(layout="wide")
-st.title("🕵️ Streamlit Secrets 诊断工具")
-st.info("本工具用于检测应用是否能正确从环境中读取您配置的密钥。")
+STOP_WORDS = {"公司", "有限", "责任", "技术", "科技", "发展", "的", "和", "等", "与", "及"}
 
-# 检查 st.secrets 是否被正确加载
-if not st.secrets:
-    st.error("致命错误：Streamlit 的 st.secrets 对象为空！应用没有加载任何密钥。")
-else:
-    st.success("好消息：st.secrets 对象已成功加载。")
+# --- 数据库连接 ---
+try:
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
 
-    # --- 检查 SUPABASE_URL ---
-    st.header("1. 检查 SUPABASE_URL")
-    if "SUPABASE_URL" in st.secrets:
-        url = st.secrets["SUPABASE_URL"]
-        st.success("✅ 成功找到了 'SUPABASE_URL'。")
-        st.write("它读取到的值是：")
-        st.code(url, language="bash") # URL是公开信息，可以直接显示
-    else:
-        st.error("❌ 失败：在 st.secrets 中没有找到名为 'SUPABASE_URL' 的密钥。请检查名称拼写。")
+    # --- 关键修复：强制移除URL末尾可能存在的斜杠 ---
+    url = url.rstrip('/') 
 
-    # --- 安全地检查 SUPABASE_KEY ---
-    st.header("2. 检查 SUPABASE_KEY")
-    if "SUPABASE_KEY" in st.secrets:
-        key = st.secrets["SUPABASE_KEY"]
-        st.success("✅ 成功找到了 'SUPABASE_KEY'。")
-        
-        # 为了安全，我们绝不显示完整的密钥
-        st.write("为了您的安全，密钥的完整内容不会被显示。以下是它的诊断信息：")
-        key_type = type(key).__name__
-        key_length = len(key)
-        key_start = key[:5] if key_length > 5 else key
-        
-        st.code(f"""
-类型 (Type): {key_type}
-长度 (Length): {key_length}
-开头的几个字符: {key_start}...
-        """, language="bash")
-        
-        if key_length < 50:
-            st.warning("警告：这个密钥的长度看起来有点短，请确认您复制的是完整的 service_role key。")
-            
-    else:
-        st.error("❌ 失败：在 st.secrets 中没有找到名为 'SUPABASE_KEY' 的密钥。请检查名称拼写。")
+    client = PostgrestClient(rest_url=url, headers={"apikey": key})
+except Exception as e:
+    st.error("无法初始化数据库连接，请检查 Streamlit Cloud 的 Secrets 配置。")
+    st.exception(e) # 显示详细错误
+    st.stop()
+
+# --- 核心数据加载逻辑 ---
+@st.cache_data(ttl=600)
+def load_data():
+    """从 Supabase 数据库加载数据 (使用 postgrest-py)"""
+    try:
+        response = client.from_("companies").select("*").execute()
+        df = pd.DataFrame(response.data)
+        df.rename(columns={
+            'company_name': '公司名称', 'province': '省份', 'city': '城市',
+            'main_product': '主营产品', 'phone': '联系电话', 'email': '联系邮箱',
+            'website': '官网', 'latitude': '纬度', 'longitude': '经度'
+        }, inplace=True)
+        return df
+    except Exception as e:
+        st.error(f"从数据库读取数据时发生错误。")
+        st.exception(e) # 显示详细错误
+        return pd.DataFrame()
+
+# --- 可视化和主界面函数 (保持不变) ---
+def draw_heatmap(df):
+    st.subheader("🗺 企业地理分布热力图")
+    df_geo = df.dropna(subset=["纬度", "经度"])
+    if df_geo.empty: st.warning("没有可供显示的地理数据。"); return
+    map_center = [df_geo["纬度"].mean(), df_geo["经度"].mean()]
+    m = folium.Map(location=map_center, zoom_start=5)
+    HeatMap(data=df_geo[["纬度", "经度"]].values, radius=12).add_to(m)
+    st_folium(m, width=700, height=500)
+
+def product_bar_chart(df):
+    st.subheader("📊 主营产品关键词频次图")
+    if df.empty or "主营产品" not in df.columns: st.warning("没有可供分析的产品数据。"); return
+    texts = " ".join(df["主营产品"].astype(str).tolist())
+    words = jieba.lcut(texts)
+    words = [w for w in words if len(w) > 1 and w not in STOP_WORDS]
+    if not words: st.info("未提取到有效的关键词。"); return
+    top_words = Counter(words).most_common(15)
+    bar_df = pd.DataFrame(top_words, columns=["关键词", "频次"])
+    chart = alt.Chart(bar_df).mark_bar().encode(x=alt.X("频次:Q"), y=alt.Y("关键词:N", sort="-x"), tooltip=["关键词", "频次"]).properties(title="主营产品高频词 Top 15")
+    st.altair_chart(chart, use_container_width=True)
+
+def main():
+    st.title("🤖 动态中国机器人制造业客户情报平台")
+    st.caption("数据源：Supabase 实时云数据库 (轻量连接版)")
+    df = load_data()
+    if df.empty:
+        st.info("✅ 应用已成功连接到数据库，但数据库当前为空。请等待爬虫写入数据。")
+        st.stop()
+    st.sidebar.header("筛选条件")
+    provinces = ["全部"] + sorted(df["省份"].unique().tolist())
+    province = st.sidebar.selectbox("选择省份", options=provinces)
+    keyword = st.sidebar.text_input("产品关键词（模糊搜索）")
+    filtered_df = df.copy()
+    if province != "全部": filtered_df = filtered_df[filtered_df["省份"] == province]
+    if keyword: filtered_df = filtered_df[filtered_df["主营产品"].str.contains(keyword, na=False)]
+    st.subheader("📋 企业列表")
+    st.dataframe(filtered_df[["公司名称", "主营产品", "联系电话", "联系邮箱", "城市", "官网"]], use_container_width=True)
+    csv = filtered_df.to_csv(index=False).encode('utf-8-sig')
+    st.download_button("📥 下载筛选结果 (CSV)", data=csv, file_name="robot_clients.csv")
+    st.divider()
+    col1, col2 = st.columns(2)
+    with col1: draw_heatmap(filtered_df)
+    with col2: product_bar_chart(filtered_df)
+
+if __name__ == "__main__":
+    main()
